@@ -1440,11 +1440,18 @@ public class HeadersController extends TransactionFormController implements Init
 
         //Don't include non witness utxo fields for segwit wallets when displaying the PSBT as a QR - it can add greatly to the time required for scanning
         boolean includeNonWitnessUtxos = !Arrays.asList(ScriptType.WITNESS_TYPES).contains(headersForm.getSigningWallet().getScriptType());
-        byte[] psbtBytes = headersForm.getPsbt().getForExport().serialize(true, includeNonWitnessUtxos);
+        PSBT exportedPsbt = AppServices.psbtForExport(headersForm.getSigningWallet(), headersForm.getPsbt());
+        byte[] psbtBytes = exportedPsbt.getForExport().serialize(true, includeNonWitnessUtxos);
 
         CryptoPSBT cryptoPSBT = new CryptoPSBT(psbtBytes);
         BBQR bbqr = addBbqrOption ? new BBQR(BBQRType.PSBT, psbtBytes) : null;
         QRDisplayDialog qrDisplayDialog = new QRDisplayDialog(cryptoPSBT.toUR(), bbqr, addLegacyEncodingOption, true, encoding);
+        //Which of the two exports this is. The send screen says it while the transaction is being built; this is
+        //where someone is about to carry it to a device.
+        String description = AppServices.exportDescription(headersForm.getSigningWallet(), exportedPsbt);
+        if(description != null) {
+            qrDisplayDialog.getDialogPane().setHeaderText(description);
+        }
         qrDisplayDialog.initOwner(toggleButton.getScene().getWindow());
         Optional<ButtonType> optButtonType = qrDisplayDialog.showAndWait();
         if(optButtonType.isPresent() && optButtonType.get().getButtonData() == ButtonBar.ButtonData.OK_DONE) {
@@ -1523,7 +1530,7 @@ public class HeadersController extends TransactionFormController implements Init
             }
 
             try(FileOutputStream outputStream = new FileOutputStream(file)) {
-                outputStream.write(headersForm.getPsbt().getForExport().serialize());
+                outputStream.write(AppServices.psbtForExport(headersForm.getSigningWallet(), headersForm.getPsbt()).getForExport().serialize());
             } catch(IOException e) {
                 log.error("Error saving PSBT", e);
                 AppServices.showErrorDialog("Error saving PSBT", "Cannot write to " + file.getAbsolutePath());

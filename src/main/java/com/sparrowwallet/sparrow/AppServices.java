@@ -1567,7 +1567,17 @@ public class AppServices {
         //One read of the tip for both answers. Reading it again for the caveats would let the headline describe one
         //tip and the caveats another, which is the same class of split reading the ChainTip record exists to prevent.
         ChainTip tip = decisionTip();
-        UnifiedSigHashDecision chain = chainDecision(Network.get(), tip == null ? null : tip.height(), tip == null ? null : tip.header());
+        return unifiedSigHashStatus(wallet, chainDecision(Network.get(), tip == null ? null : tip.height(), tip == null ? null : tip.header()));
+    }
+
+    /**
+     * Assembling the caveats, given what the chain answered.
+     *
+     * Split from the tip read so it can be asked a question with a known answer. A caveat that is written correctly
+     * and never reaches the status reads the same as one that was never written, which is the failure this feature
+     * has had once already.
+     */
+    static UnifiedSigHashStatus unifiedSigHashStatus(Wallet wallet, UnifiedSigHashDecision chain) {
         UnifiedSigHashDecision decision = combinedDecision(chain, wallet);
 
         if(!decision.isOptedIn()) {
@@ -1582,6 +1592,13 @@ public class AppServices {
         }
         if(chain.getCaveat() != null) {
             caveats.add(chain.getCaveat());
+        }
+        //Only where nothing else has named these signers; the quorum caveat above already does where it fires.
+        if(keystores.getCaveat() == null) {
+            String cannotSign = unmarkedSignerCaveat(wallet);
+            if(cannotSign != null) {
+                caveats.add(cannotSign);
+            }
         }
 
         return new UnifiedSigHashStatus(decision, List.copyOf(caveats));
@@ -1631,6 +1648,99 @@ public class AppServices {
     public static String keystoreCaveat(Wallet wallet) {
         UnifiedSigHashDecision keystores = keystoreDecision(wallet);
         return keystores.getCaveat() == null ? null : keystores.getCaveat() + markedSignerSuffix(wallet);
+    }
+
+    /**
+     * The PSBT to export, with the opt-in dropped once the transaction no longer needs it declared.
+     *
+     * One opted-in signature makes a transaction unreplayable whatever the rest carry, so once the PSBT holds one,
+     * the declared type has done its work. Clearing it from there lets a signer that cannot produce the opt-in take
+     * its turn: psbtForDevice does the same over USB, and a QR or a file has no device to ask. Krux, which reported
+     * this, has no USB mode at all, so without this a 2-of-3 that loses one marked signer cannot be spent.
+     *
+     * Before that signature exists the declaration is the only thing asking for the opt-in, so it is left alone and
+     * the marked signers go first.
+     */
+    public static PSBT psbtForExport(Wallet wallet, PSBT psbt) {
+        if(wallet == null || psbt == null || wallet.getKeystores() == null) {
+            return psbt;
+        }
+
+        if(wallet.getKeystores().stream().allMatch(AppServices::canKeystoreSignUnified)) {
+            return psbt;
+        }
+
+        //Read off the signatures, not the declaration: the declaration is what is about to be changed.
+        if(signatureOptInCounts(psbt, wallet)[0] == 0) {
+            return psbt;
+        }
+
+        PSBT exportPsbt = psbt.copy();
+        for(PSBTInput psbtInput : exportPsbt.getPsbtInputs()) {
+            SigHash sigHash = psbtInput.getSigHash();
+            if(sigHash != null && sigHash.isUnified()) {
+                psbtInput.setSigHash(sigHash.withoutUnified());
+            }
+        }
+
+        return exportPsbt;
+    }
+
+    /**
+     * What to say above an exported PSBT, or null where there is nothing worth saying.
+     *
+     * The send screen says this too, but it says it while the transaction is being built and only on hover. This is
+     * the moment it is acted on: someone is about to carry this to a device. The same button also produces a
+     * different export before and after the first signature, and without a word here that change is invisible.
+     */
+    public static String exportDescription(Wallet wallet, PSBT psbt) {
+        String names = unmarkedSignerNames(wallet);
+        if(names == null || psbt == null) {
+            return null;
+        }
+
+        boolean optedIn = psbt.getPsbtInputs().stream()
+                .anyMatch(psbtInput -> psbtInput.getSigHash() != null && psbtInput.getSigHash().isUnified());
+
+        return optedIn
+                ? "Asks every signer for the unified sighash, which " + names + " cannot produce. Sign with one of the others first."
+                : "Any signer can sign this, including " + names + ".";
+    }
+
+    /** The signers that cannot produce the opt-in, by name, or null where every one of them can. */
+    private static String unmarkedSignerNames(Wallet wallet) {
+        if(wallet == null || wallet.getKeystores() == null) {
+            return null;
+        }
+
+        List<String> names = wallet.getKeystores().stream()
+                .filter(keystore -> !canKeystoreSignUnified(keystore))
+                .map(Keystore::getLabel)
+                .filter(label -> label != null && !label.isBlank())
+                .toList();
+
+        return names.isEmpty() ? null : String.join(", ", names);
+    }
+
+    /**
+     * The signers an opted-in transaction cannot be handed as it stands.
+     *
+     * The declaration asks every signer for the opt-in until one signature carries it, after which psbtForExport
+     * drops it and these can sign. So the remedy is an order, not a cable: a marked signer first. Independent of
+     * whether the transaction is protected, which is a separate question about who signs.
+     */
+    static String unmarkedSignerCaveat(Wallet wallet) {
+        if(wallet == null || wallet.getKeystores() == null) {
+            return null;
+        }
+
+        String names = unmarkedSignerNames(wallet);
+        if(names == null) {
+            return null;
+        }
+
+        return "Sign with a marked signer first. The opt-in is asked for until one signature carries it, and until "
+                + "then a QR or file export is one these will refuse: " + names + ".";
     }
 
     /**
