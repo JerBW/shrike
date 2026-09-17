@@ -10,6 +10,7 @@ import com.sparrowwallet.drongo.dns.DnsPaymentCache;
 import com.sparrowwallet.drongo.policy.PolicyType;
 import com.sparrowwallet.drongo.protocol.*;
 import com.sparrowwallet.drongo.psbt.*;
+import com.sparrowwallet.drongo.silentpayments.InvalidSilentPaymentException;
 import com.sparrowwallet.drongo.silentpayments.SilentPaymentAddress;
 import com.sparrowwallet.drongo.wallet.*;
 import com.sparrowwallet.hummingbird.UR;
@@ -396,8 +397,8 @@ public class AppController implements Initializable {
 
         Theme configTheme = Config.get().getTheme();
         if(configTheme == null) {
-            configTheme = Theme.LIGHT;
-            Config.get().setTheme(Theme.LIGHT);
+            configTheme = Theme.SYSTEM;
+            Config.get().setTheme(Theme.SYSTEM);
         }
         final Theme selectedTheme = configTheme;
         Optional<Toggle> selectedThemeToggle = theme.getToggles().stream().filter(toggle -> selectedTheme.equals(toggle.getUserData())).findFirst();
@@ -594,7 +595,9 @@ public class AppController implements Initializable {
             controller.initializeView();
             setStageIcon(stage);
             stage.setOnShowing(event -> {
-                AppServices.moveToActiveWindowScreen(stage, 600, 500);
+                //The macOS application menu reuses a single About stage, so the theme may have changed since it was created
+                controller.refreshTheme();
+                AppServices.moveToActiveWindowScreen(stage, 600, 460);
             });
 
             return stage;
@@ -843,6 +846,9 @@ public class AppController implements Initializable {
         TabData tabData = (TabData)selectedTab.getUserData();
         if(tabData.getType() == TabData.TabType.TRANSACTION) {
             TransactionTabData transactionTabData = (TransactionTabData)tabData;
+            if(!verifyPSBT(transactionTabData.getTransactionData().getSigningWallet(), transactionTabData.getPsbt())) {
+                return;
+            }
 
             Stage window = new Stage();
             FileChooser fileChooser = new FileChooser();
@@ -898,6 +904,10 @@ public class AppController implements Initializable {
         TabData tabData = (TabData)selectedTab.getUserData();
         if(tabData.getType() == TabData.TabType.TRANSACTION) {
             TransactionTabData transactionTabData = (TransactionTabData)tabData;
+            if(!verifyPSBT(transactionTabData.getTransactionData().getSigningWallet(), transactionTabData.getPsbt())) {
+                return;
+            }
+
             PSBT exportPsbt = exportPsbt(transactionTabData).getForExport();
             String data = asBase64 ? exportPsbt.toBase64String() : exportPsbt.toString();
 
@@ -912,6 +922,9 @@ public class AppController implements Initializable {
         TabData tabData = (TabData)selectedTab.getUserData();
         if(tabData.getType() == TabData.TabType.TRANSACTION) {
             TransactionTabData transactionTabData = (TransactionTabData)tabData;
+            if(!verifyPSBT(transactionTabData.getTransactionData().getSigningWallet(), transactionTabData.getPsbt())) {
+                return;
+            }
 
             byte[] psbtBytes = exportPsbt(transactionTabData).getForExport().serialize();
             CryptoPSBT cryptoPSBT = new CryptoPSBT(psbtBytes);
@@ -1386,6 +1399,7 @@ public class AppController implements Initializable {
         File walletFile = Storage.getExistingWallet(wallet.getName());
         if(walletFile != null) {
             Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
+            alert.initOwner(rootStack.getScene().getWindow());
             AppServices.setStageIcon(alert.getDialogPane().getScene().getWindow());
             alert.setTitle("Existing wallet found");
             alert.setHeaderText("Replace existing wallet?");
@@ -1551,7 +1565,7 @@ public class AppController implements Initializable {
                 bitcoinUnit = wallet.getAutoUnit();
             }
 
-            sendToManyDialog = new SendToManyDialog(bitcoinUnit, Config.get().getUnitFormat(), initialPayments);
+            sendToManyDialog = new SendToManyDialog(wallet, bitcoinUnit, Config.get().getUnitFormat(), initialPayments);
             sendToManyDialog.initModality(Modality.NONE);
             Optional<List<Payment>> optPayments = sendToManyDialog.showAndWait();
             sendToManyDialog = null;
@@ -2208,22 +2222,49 @@ public class AppController implements Initializable {
             if(!psbt.isFinalized()) {
                 //As per BIP174, combine PSBTs with matching transactions so long as they are not yet finalized
                 try {
-                    currentPsbt.verifyCombinedSignatures(psbt);
+                    PSBT combinedPsbt = currentPsbt.verifyCombinedSignatures(psbt);
+                    //A combine can resolve a silent payment output script, which is only valid if the metadata provided with it proves the claimed address
+                    verifySilentPaymentScripts(transactionTabData.getTransactionData().getSigningWallet(), combinedPsbt);
                     currentPsbt.combine(psbt);
                     setTabName(tab, name);
                     EventManager.get().post(new PSBTCombinedEvent(currentPsbt));
                 } catch(PSBTSignatureException e) {
                     AppServices.showErrorDialog("Invalid PSBT", e.getMessage());
+                } catch(InvalidSilentPaymentException e) {
+                    AppServices.showErrorDialog("Unverified Silent Payment Outputs", e.getMessage());
                 }
             } else {
                 //If the new PSBT is finalized, copy the finalized fields to the existing unfinalized PSBT
-                currentPsbt.copyFinalizedFields(psbt);
-                setTabName(tab, name);
-                EventManager.get().post(new PSBTFinalizedEvent(currentPsbt));
+                try {
+                    //A finalized PSBT is copied rather than combined, so the signatures it provides are verified here before they replace those already collected
+                    currentPsbt.verifyFinalizedSignatures(psbt);
+                    currentPsbt.copyFinalizedFields(psbt);
+                    setTabName(tab, name);
+                    EventManager.get().post(new PSBTFinalizedEvent(currentPsbt));
+                } catch(PSBTSignatureException e) {
+                    AppServices.showErrorDialog("Invalid PSBT", e.getMessage());
+                }
             }
         }
 
         tabs.getSelectionModel().select(tab);
+    }
+
+    private boolean verifyPSBT(Wallet signingWallet, PSBT psbt) {
+        try {
+            verifySilentPaymentScripts(signingWallet, psbt);
+        } catch(InvalidSilentPaymentException e) {
+            showErrorDialog("Unverified Silent Payment Outputs", e.getMessage());
+            return false;
+        }
+
+        return true;
+    }
+
+    private void verifySilentPaymentScripts(Wallet signingWallet, PSBT psbt) throws InvalidSilentPaymentException {
+        if(signingWallet != null) {
+            signingWallet.verifySilentPaymentScripts(psbt);
+        }
     }
 
     private boolean verifyTransactionContext(PSBT contextPsbt, Transaction transaction, PSBT psbt, String source) {
@@ -2628,10 +2669,11 @@ public class AppController implements Initializable {
             Config.get().setTheme(selectedTheme);
         }
 
-        EventManager.get().post(new ThemeChangedEvent(selectedTheme));
+        EventManager.get().post(new ThemeChangedEvent(AppServices.getActiveTheme()));
     }
 
     private void serverToggleStartAnimation() {
+        serverToggleStopAnimation();
         Node thumbArea = serverToggle.lookup(".thumb-area");
         if(thumbArea != null) {
             Timeline timeline = AnimationUtil.getPulse(thumbArea, Duration.millis(600), 1.0, 0.25, 8);
@@ -2732,7 +2774,18 @@ public class AppController implements Initializable {
 
     @Subscribe
     public void themeChanged(ThemeChangedEvent event) {
-        AppServices.applyThemeStylesheet(tabs.getScene());
+        //Owned dialogs follow the main window stylesheets, but these non-modal dialogs have no owner
+        List<Scene> scenes = new ArrayList<>(List.of(tabs.getScene()));
+        if(sendToManyDialog != null) {
+            scenes.add(sendToManyDialog.getDialogPane().getScene());
+        }
+        if(searchWalletDialog != null) {
+            scenes.add(searchWalletDialog.getDialogPane().getScene());
+        }
+
+        for(Scene scene : scenes) {
+            AppServices.applyThemeStylesheet(scene);
+        }
 
         for(Tab tab : tabs.getTabs()) {
             if(tab.getUserData() instanceof WalletTabData) {
