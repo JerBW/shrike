@@ -6,6 +6,7 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.Field;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -46,6 +47,28 @@ public class ThemeStylesheetTest {
         Assertions.assertTrue(AppServices.getThemeStylesheet().endsWith("lighttheme.css"));
         Config.get().setTheme(Theme.DARK);
         Assertions.assertTrue(AppServices.getThemeStylesheet().endsWith("darktheme.css"));
+    }
+
+    @Test
+    public void theSystemThemeFollowsTheOperatingSystem() throws Exception {
+        //Upstream 2.5.5 added SYSTEM and made it the default for new installs. Resolving the stylesheet from
+        //Config.getTheme() alone would hand a dark desktop the light sheet, so it has to go through isDarkTheme().
+        Field systemDarkTheme = AppServices.class.getDeclaredField("systemDarkTheme");
+        systemDarkTheme.setAccessible(true);
+        boolean entry = systemDarkTheme.getBoolean(null);
+        try {
+            Config.get().setTheme(Theme.SYSTEM);
+
+            systemDarkTheme.setBoolean(null, true);
+            Assertions.assertTrue(AppServices.getThemeStylesheet().endsWith("darktheme.css"),
+                    "a dark desktop on the system theme must get the dark stylesheet");
+
+            systemDarkTheme.setBoolean(null, false);
+            Assertions.assertTrue(AppServices.getThemeStylesheet().endsWith("lighttheme.css"),
+                    "a light desktop on the system theme must get the light stylesheet");
+        } finally {
+            systemDarkTheme.setBoolean(null, entry);
+        }
     }
 
     /** The rules that carry the fork's red. Dark carries many more, but those adapt to its ground rather than brand it. */

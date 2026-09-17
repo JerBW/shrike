@@ -36,6 +36,7 @@ import com.sparrowwallet.sparrow.net.*;
 import io.reactivex.rxjavafx.schedulers.JavaFxScheduler;
 import io.reactivex.subjects.PublishSubject;
 import javafx.application.Application;
+import javafx.application.ColorScheme;
 import javafx.application.Platform;
 import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.SimpleBooleanProperty;
@@ -141,6 +142,7 @@ public class AppServices {
     //so this is not confined to a single thread
     private static volatile Integer nodeHardforkHeight;
     private static final AtomicReference<String> lastReportedActivationHeightMismatch = new AtomicReference<>();
+    private static volatile boolean systemDarkTheme;
 
     private static final Map<Integer, BlockSummary> blockSummaries = new ConcurrentHashMap<>();
 
@@ -734,6 +736,16 @@ public class AppServices {
 
     public static boolean isConnected() {
         return onlineProperty.get() && get().connectionService != null && get().connectionService.isConnected();
+    }
+
+    public static boolean cancelConnection() {
+        if(get().connectionService != null && get().connectionService.isRunning()) {
+            onlineProperty.set(false);
+            get().connectionService.cancel();
+            return true;
+        }
+
+        return false;
     }
 
     public static BooleanProperty onlineProperty() {
@@ -1971,6 +1983,34 @@ public class AppServices {
         return getInteractionServices().showAlert(title, content, alertType, graphic, buttons);
     }
 
+    public static void monitorSystemTheme() {
+        try {
+            Platform.Preferences preferences = Platform.getPreferences();
+            systemDarkTheme = preferences.getColorScheme() == ColorScheme.DARK;
+            preferences.colorSchemeProperty().addListener((observable, oldValue, colorScheme) -> {
+                systemDarkTheme = colorScheme == ColorScheme.DARK;
+                if(Config.get().getTheme() == null || Config.get().getTheme() == Theme.SYSTEM) {
+                    EventManager.get().post(new ThemeChangedEvent(getActiveTheme()));
+                }
+            });
+        } catch(Exception e) {
+            log.warn("Could not read the system color scheme", e);
+        }
+    }
+
+    public static Theme getActiveTheme() {
+        Theme theme = Config.get().getTheme();
+        if(theme == null || theme == Theme.SYSTEM) {
+            return systemDarkTheme ? Theme.DARK : Theme.LIGHT;
+        }
+
+        return theme;
+    }
+
+    public static boolean isDarkTheme() {
+        return getActiveTheme() == Theme.DARK;
+    }
+
     public static void setStageIcon(Window window) {
         Stage stage = (Stage)window;
         stage.getIcons().add(getWindowIcon());
@@ -1984,7 +2024,7 @@ public class AppServices {
     }
 
     public static String getThemeStylesheet() {
-        return AppServices.class.getResource(Config.get().getTheme() == Theme.DARK ? "darktheme.css" : "lighttheme.css").toExternalForm();
+        return AppServices.class.getResource(isDarkTheme() ? "darktheme.css" : "lighttheme.css").toExternalForm();
     }
 
     public static void applyThemeStylesheet(Scene scene) {
@@ -2163,7 +2203,7 @@ public class AppServices {
             if(wallet != null) {
                 final Wallet sendingWallet = wallet;
                 EventManager.get().post(new SendActionEvent(sendingWallet, new ArrayList<>(sendingWallet.getSpendableUtxos().keySet()), true));
-                Platform.runLater(() -> EventManager.get().post(new SendPaymentsEvent(sendingWallet, List.of(bitcoinURI.toPayment()), bitcoinURI)));
+                Platform.runLater(() -> EventManager.get().post(new SendPaymentsEvent(sendingWallet, List.of(bitcoinURI.toPayment(sendingWallet)), bitcoinURI)));
             }
         } catch(Exception e) {
             showErrorDialog("Not a valid bitcoin URI", e.getMessage());
@@ -2573,12 +2613,18 @@ public class AppServices {
 
     private void showProofsDialog(TransactionProofsEvent event, String title, String content) {
         Platform.runLater(() -> {
-            ButtonType refreshButton = new ButtonType("Refresh Wallet", ButtonBar.ButtonData.OK_DONE);
-            Optional<ButtonType> optType = showErrorDialog(title, content + (event.getReferences().size() == 1 ? " It is" : " They are")
-                    + " shown as unconfirmed until verified.\n\nConsider switching servers, and refreshing the wallet afterwards.",
-                    ButtonType.CANCEL, refreshButton);
-            if(optType.isPresent() && optType.get() == refreshButton) {
-                EventManager.get().post(new RequestWalletRefreshEvent(event.getWallet()));
+            if(event.getWallet() == null) {
+                //Reached outside any wallet, so there is no history holding it and nothing to refresh: it is shown at the height the server reported,
+                //marked as unproven, and switching servers is the only thing that puts the question to anyone else
+                showErrorDialog(title, content + " It is shown at that height marked unverified.\n\nConsider switching servers.");
+            } else {
+                ButtonType refreshButton = new ButtonType("Refresh Wallet", ButtonBar.ButtonData.OK_DONE);
+                Optional<ButtonType> optType = showErrorDialog(title, content + (event.getReferences().size() == 1 ? " It is" : " They are")
+                        + " shown as unconfirmed until verified.\n\nConsider switching servers, and refreshing the wallet afterwards.",
+                        ButtonType.CANCEL, refreshButton);
+                if(optType.isPresent() && optType.get() == refreshButton) {
+                    EventManager.get().post(new RequestWalletRefreshEvent(event.getWallet()));
+                }
             }
         });
     }
