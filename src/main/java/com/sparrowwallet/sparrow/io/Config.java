@@ -240,7 +240,7 @@ public class Config {
     //Every source quotes the SHA256d chain, which is not what this wallet holds. The stored
     //preference is still written, so it returns as the user set it once a real rate exists.
     public ExchangeSource getExchangeSource() {
-        return ExchangeSource.NONE;
+        return exchangeSource == null ? ExchangeSource.NONE : exchangeSource;
     }
 
     public void setExchangeSource(ExchangeSource exchangeSource) {

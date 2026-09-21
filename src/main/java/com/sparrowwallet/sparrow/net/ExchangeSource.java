@@ -198,7 +198,48 @@ public enum ExchangeSource {
             return historicalRates;
         }
     },
-    MEMPOOL_SPACE("mempool.space", "Historical rates from Apr 2023") {
+    NEOXEX("NeoxEX", "XBT/USDC current rate only") {
+        @Override
+        public List<Currency> getSupportedCurrencies() {
+            return List.of(Currency.getInstance("USD"));
+        }
+
+        @Override
+        public Double getExchangeRate(Currency currency) {
+            if(!"USD".equalsIgnoreCase(currency.getCurrencyCode())) {
+                return null;
+            }
+
+            NeoxExRates rates = getRates();
+            return rates.ticker == null ? null : rates.ticker.lastPrice;
+        }
+
+        private NeoxExRates getRates() {
+            String url = "https://neoxa.exchange/api/exchange/ticker/BTCB2_USDC";
+
+            if(log.isInfoEnabled()) {
+                log.info("Requesting XBT exchange rate from " + url);
+            }
+
+            HttpClientService httpClientService = AppServices.getHttpClientService();
+            try {
+                return httpClientService.requestJson(url, NeoxExRates.class, HTTP_HEADERS);
+            } catch(Exception e) {
+                if(log.isDebugEnabled()) {
+                    log.warn("Error retrieving NeoxEX XBT exchange rate", e);
+                } else {
+                    log.warn("Error retrieving NeoxEX XBT exchange rate (" + e.getMessage() + ")");
+                }
+
+                return new NeoxExRates();
+            }
+        }
+
+        @Override
+        public Map<Date, Double> getHistoricalExchangeRates(Currency currency, Date start, Date end) {
+            return Collections.emptyMap();
+        }
+    },    MEMPOOL_SPACE("mempool.space", "Historical rates from Apr 2023") {
         @Override
         public List<Currency> getSupportedCurrencies() {
             return getRates().rates.entrySet().stream().filter(price -> isValidISO4217Code(price.getKey().toUpperCase(Locale.ROOT)))
@@ -384,6 +425,15 @@ public enum ExchangeSource {
         public List<List<Number>> prices = new ArrayList<>();
     }
 
+    private static class NeoxExRates {
+        public boolean success;
+        public String pair;
+        public NeoxExTicker ticker = new NeoxExTicker();
+    }
+
+    private static class NeoxExTicker {
+        public Double lastPrice;
+    }
     private static class MempoolSpaceRates {
         public long time;
         public final Map<String, Double> rates = new LinkedHashMap<>();
@@ -404,3 +454,4 @@ public enum ExchangeSource {
         public List<MempoolSpaceRates> prices = new ArrayList<>();
     }
 }
+

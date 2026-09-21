@@ -162,8 +162,8 @@ public class GeneralSettingsController extends SettingsDetailController {
 
         //updateCurrencies() already disables fiatCurrency when the source supplies none, so only
         //the source itself needs disabling here.
-        exchangeSource.setDisable(true);
-        exchangeSource.setTooltip(new Tooltip("No exchange rate is available yet, so no fiat value is shown."));
+        exchangeSource.setDisable(false);
+        exchangeSource.setTooltip(null);
 
         loadRecentWallets.setSelected(config.isLoadRecentWallets());
         loadRecentWallets.selectedProperty().addListener((observableValue, oldValue, newValue) -> {
