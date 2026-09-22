@@ -4,6 +4,21 @@ Shrike is an unofficial fork of [Sparrow Bitcoin Wallet](https://github.com/spar
 
 > **Not audited. Use at your own risk, and no warranty of any kind, see the [Apache 2.0 license](LICENSE).** Everything below the divider is upstream's documentation and describes Sparrow rather than Shrike.
 
+## NeoxEX XBT fiat pricing
+
+This branch adds fiat-value support for XBT using the NeoxEX `BTCB2_USDC` market price.
+
+Changes in this branch:
+
+- Adds `NeoxEX` as an exchange-rate source.
+- Uses the current `BTCB2_USDC` price for USD wallet valuation.
+- Re-enables the exchange-source selector in Shrike.
+- Persists the selected exchange source across restarts.
+- Adds a NeoxEX icon to the exchange-source selector.
+- Supports current USD valuation only; historical exchange rates are not provided.
+
+NeoxEX reports the market in USDC; this branch uses that value for USD display purposes.
+
 ## What differs from Sparrow
 
 - **BLAKE2b proof of work.** Validates the 164 byte v2 block header and takes the BLAKE2b hash as the block id past activation. Implemented in the [drongo](https://github.com/privkeyio/drongo) submodule.
