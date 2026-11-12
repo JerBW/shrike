@@ -96,6 +96,38 @@
 .tree-table-view:focused > .virtual-flow > .clipped-container > .sheet > .tree-table-row-cell:filled:selected .coin-cell.negative-amount {
     -fx-text-fill: white;
 }
+/*
+ * Coinbase maturity and labeled mining-payout visualization.
+ * Tooltips intentionally retain Shrike's normal grey styling.
+ */
+.coin-cell:coinbase-maturity-early,
+.coin-cell:coinbase-maturity-quarter,
+.coin-cell:coinbase-maturity-half,
+.coin-cell:coinbase-maturity-late,
+.coin-cell:coinbase-maturity-mature {
+    -fx-background-insets: 3 6 3 6;
+    -fx-background-radius: 5;
+}
+
+.coin-cell:coinbase-maturity-early {
+    -fx-background-color: rgba(111, 39, 48, 0.58);
+}
+
+.coin-cell:coinbase-maturity-quarter {
+    -fx-background-color: rgba(134, 80, 30, 0.58);
+}
+
+.coin-cell:coinbase-maturity-half {
+    -fx-background-color: rgba(117, 101, 31, 0.58);
+}
+
+.coin-cell:coinbase-maturity-late {
+    -fx-background-color: rgba(41, 78, 119, 0.58);
+}
+
+.coin-cell:coinbase-maturity-mature {
+    -fx-background-color: rgba(46, 103, 62, 0.58);
+}
 
 .confirmation-progress-circle, .confirmation-progress-tick {
     -fx-stroke: -fx-text-base-color;
