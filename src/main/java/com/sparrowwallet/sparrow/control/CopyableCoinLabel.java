@@ -85,7 +85,7 @@ public class CopyableCoinLabel extends CopyableLabel {
         }
 
         String satsValue = unitFormat.formatSatsValue(value) + " sats";
-        String btcValue = unitFormat.formatBtcValue(value) + " BTC";
+        String btcValue = unitFormat.formatBtcValue(value) + " XBT";
 
         BitcoinUnit unit = bitcoinUnit;
         if(unit == null || unit.equals(BitcoinUnit.AUTO)) {
@@ -113,7 +113,7 @@ public class CopyableCoinLabel extends CopyableLabel {
                 Clipboard.getSystemClipboard().setContent(content);
             });
 
-            MenuItem copyBtcValue = new MenuItem("Copy Value in BTC");
+            MenuItem copyBtcValue = new MenuItem("Copy Value in XBT");
             copyBtcValue.setOnAction(AE -> {
                 hide();
                 ClipboardContent content = new ClipboardContent();

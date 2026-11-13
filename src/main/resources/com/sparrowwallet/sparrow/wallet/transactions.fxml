@@ -41,7 +41,13 @@
                             <CopyableCoinLabel fx:id="mempoolBalance" /><Region HBox.hgrow="ALWAYS"/><FiatLabel fx:id="fiatMempoolBalance" minWidth="110" />
                         </Field>
                         <Field fx:id="immatureField" text="Immature:" visible="false" managed="false">
-                            <CopyableCoinLabel fx:id="immatureBalance" /><Region HBox.hgrow="ALWAYS"/><FiatLabel fx:id="fiatImmatureBalance" minWidth="110" />
+                            <HBox spacing="10" alignment="CENTER_LEFT">
+                                <CopyableCoinLabel fx:id="immatureBalance" />
+                                <Region minWidth="12" />
+                                <Label text="Mature:" />
+                                <CopyableCoinLabel fx:id="matureBalance" />
+                            </HBox>
+                            <FiatLabel fx:id="fiatImmatureBalance" visible="false" managed="false" />
                         </Field>
                         <Field fx:id="maturesField" text="Matures in:" visible="false" managed="false">
                             <Label fx:id="immatureDuration" />

@@ -61,6 +61,9 @@ public class TransactionsController extends WalletFormController implements Init
     private CopyableCoinLabel immatureBalance;
 
     @FXML
+    private CopyableCoinLabel matureBalance;
+
+    @FXML
     private FiatLabel fiatImmatureBalance;
 
     @FXML
@@ -125,7 +128,11 @@ public class TransactionsController extends WalletFormController implements Init
     //Shown only when there is something in it, since a wallet that has never held a coinbase has nothing to say here
     private void updateImmatureBalance() {
         long immature = getWalletForm().getWallet().getImmatureBalance();
+        long total = getWalletForm().getWalletTransactionsEntry().getBalance();
+        long mature = Math.max(0L, total - immature);
+
         immatureBalance.setValue(immature);
+        matureBalance.setValue(mature);
         immatureField.setVisible(immature > 0);
         immatureField.setManaged(immature > 0);
         immatureDuration.setText(immature > 0 ? AppServices.immatureDuration(getWalletForm().getWallet()) : "");

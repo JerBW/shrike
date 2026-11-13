@@ -51,16 +51,22 @@ class CoinCell extends TreeTableCell<Entry, Number> implements ConfirmationsList
     private final CoinTooltip tooltip;
     private final CoinContextMenu contextMenu;
     private final boolean maturityEnabled;
+    private final boolean balanceTooltipEnabled;
 
     private IntegerProperty confirmationsProperty;
 
     public CoinCell() {
-        this(false);
+        this(false, false);
     }
 
     public CoinCell(boolean maturityEnabled) {
+        this(maturityEnabled, false);
+    }
+
+    public CoinCell(boolean maturityEnabled, boolean balanceTooltipEnabled) {
         super();
         this.maturityEnabled = maturityEnabled;
+        this.balanceTooltipEnabled = balanceTooltipEnabled;
         tooltip = new CoinTooltip();
         tooltip.setShowDelay(Duration.millis(500));
         contextMenu = new CoinContextMenu();
@@ -124,7 +130,11 @@ class CoinCell extends TreeTableCell<Entry, Number> implements ConfirmationsList
             }
 
             if(entry instanceof TransactionEntry transactionEntry) {
-                tooltip.showConfirmations(transactionEntry, maturityEnabled);
+                if(balanceTooltipEnabled) {
+                    tooltip.showBalanceBreakdown(transactionEntry, getTreeTableView().getRoot());
+                } else {
+                    tooltip.showConfirmations(transactionEntry, maturityEnabled);
+                }
 
                 if(transactionEntry.isConfirming()) {
                     ConfirmationProgressIndicator arc = new ConfirmationProgressIndicator(transactionEntry.getConfirmations());
@@ -267,6 +277,7 @@ class CoinCell extends TreeTableCell<Entry, Number> implements ConfirmationsList
         private boolean showConfirmations;
         private boolean maturityEnabled;
         private TransactionEntry transactionEntry;
+        private BalanceBreakdownInfo balanceBreakdownInfo;
         private String value;
 
         private CoinTooltip() {
@@ -286,6 +297,7 @@ class CoinCell extends TreeTableCell<Entry, Number> implements ConfirmationsList
             showConfirmations = true;
             this.maturityEnabled = maturityEnabled;
             this.transactionEntry = transactionEntry;
+            balanceBreakdownInfo = null;
 
             IntegerProperty txEntryConfirmationsProperty = transactionEntry.confirmationsProperty();
             int confirmations = txEntryConfirmationsProperty.get();
@@ -310,13 +322,28 @@ class CoinCell extends TreeTableCell<Entry, Number> implements ConfirmationsList
             showConfirmations = false;
             maturityEnabled = false;
             transactionEntry = null;
+            balanceBreakdownInfo = null;
             confirmationsProperty.unbind();
+            setTooltipText();
+        }
+
+        public void showBalanceBreakdown(TransactionEntry transactionEntry, TreeItem<Entry> rootItem) {
+            showConfirmations = false;
+            maturityEnabled = false;
+            this.transactionEntry = transactionEntry;
+            confirmationsProperty.unbind();
+            balanceBreakdownInfo = BalanceBreakdownInfo.from(transactionEntry, rootItem);
             setTooltipText();
         }
 
         private void setTooltipText() {
             // Keep Shrike's normal tooltip appearance for every row. Only the Value cell itself is color-coded.
             setStyle("");
+
+            if(balanceBreakdownInfo != null) {
+                setText(getBalanceBreakdownTooltipText(balanceBreakdownInfo));
+                return;
+            }
 
             boolean miningWallet = maturityEnabled && showConfirmations && isMiningWallet(transactionEntry);
             CoinbaseMaturityInfo maturityInfo = miningWallet
@@ -362,6 +389,16 @@ class CoinCell extends TreeTableCell<Entry, Number> implements ConfirmationsList
             return (value == null ? "" : value) + "\n\nMining pool payout\nSpendable";
         }
 
+        private String getBalanceBreakdownTooltipText(BalanceBreakdownInfo info) {
+            UnitFormat format = Config.get().getUnitFormat() == null ? UnitFormat.DOT : Config.get().getUnitFormat();
+
+            return format.formatSatsValue(info.total()) + " sats total"
+                    + "\n\n" + format.formatSatsValue(info.spendable()) + " sats"
+                    + "\nMature & spendable"
+                    + "\n\n" + format.formatSatsValue(info.immature()) + " sats"
+                    + "\nImmature coinbase";
+        }
+
         private String capitalize(String text) {
             if(text == null || text.isEmpty()) {
                 return "";
@@ -395,6 +432,68 @@ class CoinCell extends TreeTableCell<Entry, Number> implements ConfirmationsList
 
         public PseudoClass pseudoClass() {
             return pseudoClass;
+        }
+    }
+
+    private record BalanceBreakdownInfo(long total, long spendable, long immature,
+                                        long matureReceipts, long immatureReceipts,
+                                        long spends, long adjustment) {
+        private static BalanceBreakdownInfo from(TransactionEntry target, TreeItem<Entry> rootItem) {
+            if(target == null || rootItem == null || rootItem.getValue() == null) {
+                return null;
+            }
+
+            long matureReceipts = 0L;
+            long immatureReceipts = 0L;
+            long spends = 0L;
+            boolean foundTarget = false;
+
+            for(Entry entry : rootItem.getValue().getChildren()) {
+                if(!(entry instanceof TransactionEntry transactionEntry)) {
+                    continue;
+                }
+
+                long value = transactionEntry.getValue();
+
+                boolean includedInBalance = transactionEntry.getConfirmations() != 0
+                        || value < 0
+                        || Config.get().isIncludeMempoolOutputs();
+
+                if(includedInBalance) {
+                    if(value < 0) {
+                        spends += value;
+                    } else if(transactionEntry.isCoinbase()) {
+                        CoinbaseMaturityInfo maturityInfo = CoinbaseMaturityInfo.from(transactionEntry);
+
+                        if(maturityInfo != null && maturityInfo.status() == CoinbaseMaturityStatus.MATURE) {
+                            matureReceipts += value;
+                        } else {
+                            immatureReceipts += value;
+                        }
+                    } else {
+                        matureReceipts += value;
+                    }
+                }
+
+                if(transactionEntry == target || transactionEntry.equals(target)) {
+                    foundTarget = true;
+                    break;
+                }
+            }
+
+            if(!foundTarget) {
+                return null;
+            }
+
+            long total = target.getBalance();
+            long spendable = matureReceipts + spends;
+            long immature = immatureReceipts;
+            long adjustment = total - (spendable + immature);
+
+            spendable += adjustment;
+
+            return new BalanceBreakdownInfo(total, spendable, immature,
+                    matureReceipts, immatureReceipts, spends, adjustment);
         }
     }
 

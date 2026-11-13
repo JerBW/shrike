@@ -43,7 +43,7 @@ public class TransactionsTreeTable extends CoinTreeTable {
         balanceCol.setCellValueFactory((TreeTableColumn.CellDataFeatures<Entry, Number> param) -> {
             return param.getValue().getValue() instanceof TransactionEntry ? ((TransactionEntry)param.getValue().getValue()).balanceProperty() : new ReadOnlyObjectWrapper<>(null);
         });
-        balanceCol.setCellFactory(p -> new CoinCell());
+        balanceCol.setCellFactory(p -> new CoinCell(false, true));
         balanceCol.setSortable(true);
         getColumns().add(balanceCol);
 
